@@ -12,14 +12,17 @@ variable "fingerprint" {}
 variable "private_key_path" {}
 variable "compartment_ocid" {}
 variable "ssh_public_key" {}
+variable "region" {default = "us-ashburn-1"}
 
 ### Provider
 
-provider "baremetal" {
+provider "oci" {
   tenancy_ocid     = "${var.tenancy_ocid}"
   user_ocid        = "${var.user_ocid}"
   fingerprint      = "${var.fingerprint}"
   private_key_path = "${var.private_key_path}"
+  region           = "${var.region}"
+  disable_auto_retries = "true"
 }
 
 ### Variables
@@ -28,54 +31,50 @@ variable "VPC-CIDR" {
   default = "10.0.0.0/16"
 }
 
-variable "InstanceOS" {
-    default = "Oracle Linux"
+variable "InstanceImageOCID" {
+    type = "map"
+    default = {
+        // Oracle-provided image "Oracle-Linux-7.4-2017.12.18-0"
+        // See https://docs.us-phoenix-1.oraclecloud.com/Content/Resources/Assets/OracleProvidedImageOCIDs.pdf
+        us-phoenix-1 = "ocid1.image.oc1.phx.aaaaaaaasc56hnpnx7swoyd2fw5gyvbn3kcdmqc2guiiuvnztl2erth62xnq"
+        us-ashburn-1 = "ocid1.image.oc1.iad.aaaaaaaaxrqeombwty6jyqgk3fraczdd63bv66xgfsqka4ktr7c57awr3p5a"
+        eu-frankfurt-1 = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaayxmzu6n5hsntq4wlffpb4h6qh6z3uskpbm5v3v4egqlqvwicfbyq"
+    }
 }
 
-variable "InstanceOSVersion" {
-    default = "7.3"
-}
-
-data "baremetal_identity_availability_domains" "ADs" {
+data "oci_identity_availability_domains" "ADs" {
   compartment_id = "${var.tenancy_ocid}"
-}
-
-# Gets the OCID of the OS image to use
-data "baremetal_core_images" "OLImageOCID" {
-    compartment_id = "${var.compartment_ocid}"
-    operating_system = "${var.InstanceOS}"
-    operating_system_version = "${var.InstanceOSVersion}"
 }
 
 ### Declare Network
 
-resource "baremetal_core_virtual_network" "SingleInstanceVCN" {
+resource "oci_core_virtual_network" "SingleInstanceVCN" {
   cidr_block     = "${var.VPC-CIDR}"
   compartment_id = "${var.compartment_ocid}"
   display_name   = "SingleInstanceVCN"
 }
 
-resource "baremetal_core_internet_gateway" "SingleInstanceIGW" {
+resource "oci_core_internet_gateway" "SingleInstanceIGW" {
   compartment_id = "${var.compartment_ocid}"
   display_name   = "SingleInstanceIGW"
-  vcn_id         = "${baremetal_core_virtual_network.SingleInstanceVCN.id}"
+  vcn_id         = "${oci_core_virtual_network.SingleInstanceVCN.id}"
 }
 
-resource "baremetal_core_route_table" "SingleInstanceRoutingTable" {
+resource "oci_core_route_table" "SingleInstanceRoutingTable" {
   compartment_id = "${var.compartment_ocid}"
-  vcn_id         = "${baremetal_core_virtual_network.SingleInstanceVCN.id}"
+  vcn_id         = "${oci_core_virtual_network.SingleInstanceVCN.id}"
   display_name   = "SingleInstanceRoutingTable"
 
   route_rules {
     cidr_block        = "0.0.0.0/0"
-    network_entity_id = "${baremetal_core_internet_gateway.SingleInstanceIGW.id}"
+    network_entity_id = "${oci_core_internet_gateway.SingleInstanceIGW.id}"
   }
 }
 
-resource "baremetal_core_security_list" "SingleInstanceSecList" {
+resource "oci_core_security_list" "SingleInstanceSecList" {
   compartment_id = "${var.compartment_ocid}"
   display_name   = "SingleInstanceSecList"
-  vcn_id         = "${baremetal_core_virtual_network.SingleInstanceVCN.id}"
+  vcn_id         = "${oci_core_virtual_network.SingleInstanceVCN.id}"
 
   egress_security_rules = [{
     protocol    = "6"
@@ -124,44 +123,46 @@ resource "baremetal_core_security_list" "SingleInstanceSecList" {
   ]
 }
 
-resource "baremetal_core_subnet" "SingleInstanceAD1" {
-  availability_domain = "${lookup(data.baremetal_identity_availability_domains.ADs.availability_domains[0],"name")}"
+resource "oci_core_subnet" "SingleInstanceAD1" {
+  availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}"
   cidr_block          = "10.0.7.0/24"
   display_name        = "SingleInstanceAD1"
   compartment_id      = "${var.compartment_ocid}"
-  vcn_id              = "${baremetal_core_virtual_network.SingleInstanceVCN.id}"
-  route_table_id      = "${baremetal_core_route_table.SingleInstanceRoutingTable.id}"
-  security_list_ids   = ["${baremetal_core_security_list.SingleInstanceSecList.id}"]
+  vcn_id              = "${oci_core_virtual_network.SingleInstanceVCN.id}"
+  route_table_id      = "${oci_core_route_table.SingleInstanceRoutingTable.id}"
+  security_list_ids   = ["${oci_core_security_list.SingleInstanceSecList.id}"]
+  dhcp_options_id     = "${oci_core_virtual_network.SingleInstanceVCN.default_dhcp_options_id}"
 }
 
-resource "baremetal_core_instance" "SingleInstance-Compute-1" {
-  availability_domain = "${lookup(data.baremetal_identity_availability_domains.ADs.availability_domains[0],"name")}" 
+resource "oci_core_instance" "SingleInstance-Compute-1" {
+  availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}" 
   compartment_id      = "${var.compartment_ocid}"
   display_name        = "SingleInstance-Compute-1"
-  image               = "${lookup(data.baremetal_core_images.OLImageOCID.images[0], "id")}"
+  image               = "${var.InstanceImageOCID[var.region]}"
+  shape               = "VM.Standard1.2"
+  subnet_id           = "${oci_core_subnet.SingleInstanceAD1.id}"
 
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
   }
-  shape     = "VM.Standard1.2"
-  subnet_id = "${baremetal_core_subnet.SingleInstanceAD1.id}"
+  
 }
 
 ### Display Public IP of Instance
 
 # Gets a list of vNIC attachments on the instance
-data "baremetal_core_vnic_attachments" "InstanceVnics" { 
+data "oci_core_vnic_attachments" "InstanceVnics" { 
 compartment_id = "${var.compartment_ocid}" 
-availability_domain = "${lookup(data.baremetal_identity_availability_domains.ADs.availability_domains[0],"name")}" 
-instance_id = "${baremetal_core_instance.SingleInstance-Compute-1.id}" 
+availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}" 
+instance_id = "${oci_core_instance.SingleInstance-Compute-1.id}" 
 } 
 
 # Gets the OCID of the first (default) vNIC
-data "baremetal_core_vnic" "InstanceVnic" { 
-vnic_id = "${lookup(data.baremetal_core_vnic_attachments.InstanceVnics.vnic_attachments[0],"vnic_id")}" 
+data "oci_core_vnic" "InstanceVnic" { 
+vnic_id = "${lookup(data.oci_core_vnic_attachments.InstanceVnics.vnic_attachments[0],"vnic_id")}" 
 }
 
 output "public_ip" {
-value = "${data.baremetal_core_vnic.InstanceVnic.public_ip_address}"
+value = "${data.oci_core_vnic.InstanceVnic.public_ip_address}"
 }
 

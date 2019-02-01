@@ -12,16 +12,19 @@ variable "fingerprint" {}
 variable "private_key_path" {}
 variable "compartment_ocid" {}
 variable "ssh_public_key" {}
-variable "region" {default = "us-ashburn-1"}
+
+variable "region" {
+  default = "us-ashburn-1"
+}
 
 ### Provider
 
 provider "oci" {
-  tenancy_ocid     = "${var.tenancy_ocid}"
-  user_ocid        = "${var.user_ocid}"
-  fingerprint      = "${var.fingerprint}"
-  private_key_path = "${var.private_key_path}"
-  region           = "${var.region}"
+  tenancy_ocid         = "${var.tenancy_ocid}"
+  user_ocid            = "${var.user_ocid}"
+  fingerprint          = "${var.fingerprint}"
+  private_key_path     = "${var.private_key_path}"
+  region               = "${var.region}"
   disable_auto_retries = "true"
 }
 
@@ -32,14 +35,16 @@ variable "VPC-CIDR" {
 }
 
 variable "InstanceImageOCID" {
-    type = "map"
-    default = {
-        // Oracle-provided image "Oracle-Linux-7.4-2017.12.18-0"
-        // See https://docs.us-phoenix-1.oraclecloud.com/Content/Resources/Assets/OracleProvidedImageOCIDs.pdf
-        us-phoenix-1 = "ocid1.image.oc1.phx.aaaaaaaasc56hnpnx7swoyd2fw5gyvbn3kcdmqc2guiiuvnztl2erth62xnq"
-        us-ashburn-1 = "ocid1.image.oc1.iad.aaaaaaaaxrqeombwty6jyqgk3fraczdd63bv66xgfsqka4ktr7c57awr3p5a"
-        eu-frankfurt-1 = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaayxmzu6n5hsntq4wlffpb4h6qh6z3uskpbm5v3v4egqlqvwicfbyq"
-    }
+  type = "map"
+
+  default = {
+    // Oracle-provided image "Oracle-Linux-7.4-2017.12.18-0"
+    // See https://docs.us-phoenix-1.oraclecloud.com/Content/Resources/Assets/OracleProvidedImageOCIDs.pdf
+    us-phoenix-1 = "ocid1.image.oc1.phx.aaaaaaaasc56hnpnx7swoyd2fw5gyvbn3kcdmqc2guiiuvnztl2erth62xnq"
+
+    us-ashburn-1   = "ocid1.image.oc1.iad.aaaaaaaaxrqeombwty6jyqgk3fraczdd63bv66xgfsqka4ktr7c57awr3p5a"
+    eu-frankfurt-1 = "ocid1.image.oc1.eu-frankfurt-1.aaaaaaaayxmzu6n5hsntq4wlffpb4h6qh6z3uskpbm5v3v4egqlqvwicfbyq"
+  }
 }
 
 data "oci_identity_availability_domains" "ADs" {
@@ -135,34 +140,33 @@ resource "oci_core_subnet" "SingleInstanceAD1" {
 }
 
 resource "oci_core_instance" "SingleInstance-Compute-1" {
-  availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}" 
+  availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}"
   compartment_id      = "${var.compartment_ocid}"
-  display_name        = "SingleInstance-Compute-1"
+  display_name        = "SingleInstance-Compute-11"
   image               = "${var.InstanceImageOCID[var.region]}"
-  shape               = "VM.Standard1.2"
+  shape               = "VM.Standard2.2"
   subnet_id           = "${oci_core_subnet.SingleInstanceAD1.id}"
 
   metadata {
     ssh_authorized_keys = "${var.ssh_public_key}"
   }
-  
 }
+
 
 ### Display Public IP of Instance
 
 # Gets a list of vNIC attachments on the instance
-data "oci_core_vnic_attachments" "InstanceVnics" { 
-compartment_id = "${var.compartment_ocid}" 
-availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}" 
-instance_id = "${oci_core_instance.SingleInstance-Compute-1.id}" 
-} 
+data "oci_core_vnic_attachments" "InstanceVnics" {
+  compartment_id      = "${var.compartment_ocid}"
+  availability_domain = "${lookup(data.oci_identity_availability_domains.ADs.availability_domains[0],"name")}"
+  instance_id         = "${oci_core_instance.SingleInstance-Compute-1.id}"
+}
 
 # Gets the OCID of the first (default) vNIC
-data "oci_core_vnic" "InstanceVnic" { 
-vnic_id = "${lookup(data.oci_core_vnic_attachments.InstanceVnics.vnic_attachments[0],"vnic_id")}" 
+data "oci_core_vnic" "InstanceVnic" {
+  vnic_id = "${lookup(data.oci_core_vnic_attachments.InstanceVnics.vnic_attachments[0],"vnic_id")}"
 }
 
 output "public_ip" {
-value = "${data.oci_core_vnic.InstanceVnic.public_ip_address}"
+  value = "${data.oci_core_vnic.InstanceVnic.public_ip_address}"
 }
-
